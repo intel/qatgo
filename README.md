@@ -20,6 +20,14 @@ The following services are available in QATgo v1.0.0:
 * C62x (QAT C62x series chipset) QAT 1.x
 * 4xxx (QAT gen 4 devices) QAT 2.0
 
+## Supported Environment Variables
+These environment variables allow you to modify default configuration options
+* QATGO_ALGORITHM: supports values gzip, lz4, and zstd
+* QATGO_COMPRESSION_LEVEL: Sets the compression level
+* QATGO_ZSTD_LIB_PATH: Loads zstd shared library from the path provided
+* QATGO_QZSTD_LIB_PATH: Loads zstd QAT plugin shared library from the path provided
+* QATGO_DEBUG_LEVEL: adjusts debug output level
+
 ## Software Requirements
 * Go 1.18 or above: https://go.dev
 * QATzip library 1.1.2 or above: https://github.com/intel/QATzip
@@ -28,7 +36,16 @@ The following services are available in QATgo v1.0.0:
 * Optional: libzstd v1.5.5 (required for zstd plugin): https://github.com/facebook/zstd
 
 ## Changelog
-* First release of QATgo
+* v1.0.1
+  * Fixed GTO-158: Close() Error Status not cleared on Reset
+  * Implemented GTO-147: Adds environment variable support for modifying defaults
+    * Adds the ability to declare the algorithm type and compression level
+    * Adds environment variables to provide custom paths to dynamic libraries
+  * Implemented GTO-154: Add addition stats for qgzip
+    * Added additional statistical output job #, loop #, algorithm, compression level
+    * Refactored worker threads to better serialize statistical output
+* v1.0.0
+  * First release of QATgo
 
 ## Release Notes
 * QAT v1.x only supports compression levels 1-8

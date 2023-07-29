@@ -184,110 +184,138 @@ func main() {
 	}
 
 	errch := make(chan error, nch)
-
+	workch := make(chan *workItem, *loops*nch)
 	printHeader := true
-	for ; *loops > 0; *loops-- {
-		if *showStatsCSV && printHeader {
-			fmt.Fprint(os.Stderr, "op,time,ucputime,scputime,itime,in,out,rtime,wtime,etime,ctime,ratio,speed\n")
-			printHeader = false
-		}
+
+	for j := 0; j < *loops; j++ {
 		if len(fileList) > 0 {
 			for i, fileName := range fileList {
-				name := fmt.Sprintf("(%d)", i)
+				w := new(workItem)
+				w.jobId = i
+				w.loopCnt = j
+				w.fileName = fileName
+				w.errch = errch
+				w.workch = workch
 				wg.Add(1)
 				if *parallel {
-					go doWork(name, errch, fileName, !*decompress)
+					go doWork(w)
 				} else {
-					doWork(name, errch, fileName, !*decompress)
+					doWork(w)
 				}
 			}
 		} else {
 			wg.Add(1)
-			doWork("-", errch, "", !*decompress)
+			w := new(workItem)
+			w.jobId = 0
+			w.loopCnt = j
+			w.fileName = ""
+			doWork(w)
 		}
 
 		wg.Wait()
 
-		for testch := true; testch; {
+		for done := false; !done; {
 			select {
 			case e := <-errch:
 				errExitCode = 1
 				fmt.Fprintf(os.Stderr, "%v\n", e)
 			default:
-				testch = false
+				done = true
+			}
+		}
+
+		if *showStats || *showStatsCSV {
+			if *showStatsCSV && printHeader {
+				printCSVHeader()
+				printHeader = false
+			}
+
+			for done := false; !done; {
+				select {
+				case w := <-workch:
+					if *showStatsCSV {
+						dumpStatsCSV(w)
+					} else {
+						dumpStats(w)
+					}
+				default:
+					done = true
+				}
 			}
 		}
 	}
 	close(errch)
 }
 
-func doWork(name string, errch chan error, fileName string, compress bool) {
+func doWork(w *workItem) {
 
 	defer wg.Done()
 	var fin, fout, ftest *os.File
 	var err error
 	var suffix string
+	name := w.fileName
 
-	if fileName == "" || fileName == "-" {
+	if w.fileName == "" || w.fileName == "-" {
 		fin = os.Stdin
 		fout = os.Stdout
+		name = "-"
 	}
 
 	// QAT settings
-	alg := qatzip.DEFLATE
-	dfmt := qatzip.Deflate48
+	w.alg = qatzip.DEFLATE
+	w.dfmt = qatzip.Deflate48
 
 	switch *algorithm {
 	case algorithmGzip:
-		alg = qatzip.DEFLATE
-		dfmt = qatzip.DeflateGzipExt
+		w.alg = qatzip.DEFLATE
+		w.dfmt = qatzip.DeflateGzipExt
 		fallthrough
 	case algorithmSWGzip:
 		suffix = ".gz"
 
 	case algorithmLZ4:
-		alg = qatzip.LZ4
+		w.alg = qatzip.LZ4
 		fallthrough
 	case algorithmSWLZ4:
 		suffix = ".lz4"
 
 	case algorithmZstd:
-		alg = qatzip.ZSTD
+		w.alg = qatzip.ZSTD
 		fallthrough
 	case algorithmSWZstd:
 		suffix = ".zst"
 
 	case algorithmRawDeflate:
-		alg = qatzip.DEFLATE
-		dfmt = qatzip.DeflateRaw
+		w.alg = qatzip.DEFLATE
+		w.dfmt = qatzip.DeflateRaw
 		fallthrough
 	case algorithmSWRawDeflate:
 		suffix = ".bin"
 	default:
-		errch <- fmt.Errorf("%s: error: algorithm not supported", name)
+		w.errch <- fmt.Errorf("%s: error: algorithm not supported", name)
 		return
 	}
 
-	if compress && fin != os.Stdin {
-		fin, err = os.OpenFile(fileName, fInputFlags, 0755)
+	if !*decompress && fin != os.Stdin {
+		fin, err = os.OpenFile(w.fileName, fInputFlags, 0755)
 		if err != nil {
-			errch <- fmt.Errorf("%s: %v", name, err)
+			w.errch <- fmt.Errorf("%s: %v", name, err)
 			return
 		}
 
 		if !*pipeOut {
 			// check if the file exists
-			ftest, err = os.OpenFile(fileName+suffix, fInputFlags, 0755)
+			ftest, err = os.OpenFile(w.fileName+suffix, fInputFlags, 0755)
 			if err == nil && !*force {
-				errch <- fmt.Errorf("%s: error: file %s already exists; not overwritten", name, fileName+suffix)
+				w.errch <- fmt.Errorf("%s: error: file %s already exists; not overwritten", name, w.fileName+suffix)
 				return
 			} else {
 				ftest.Close()
 			}
 
-			fout, err = os.OpenFile(fileName+suffix, fOutputFlags, 0664)
+			fout, err = os.OpenFile(w.fileName+suffix, fOutputFlags, 0664)
 			if err != nil {
-				errch <- fmt.Errorf("%s: %v", name, err)
+				w.errch <- fmt.Errorf("%s: %v", name, err)
 				return
 			}
 		} else {
@@ -295,33 +323,33 @@ func doWork(name string, errch chan error, fileName string, compress bool) {
 		}
 	}
 
-	if !compress && fin != os.Stdin {
-		fin, err = os.OpenFile(fileName, fInputFlags, 0755)
+	if *decompress && fin != os.Stdin {
+		fin, err = os.OpenFile(w.fileName, fInputFlags, 0755)
 		if err != nil {
-			errch <- fmt.Errorf("%s: %v", name, err)
+			w.errch <- fmt.Errorf("%s: %v", name, err)
 			return
 		}
 
 		if *test {
 			fout, err = os.OpenFile("/dev/null", fTestFlags, 0755)
 			if err != nil {
-				errch <- fmt.Errorf("%s: %v", name, err)
+				w.errch <- fmt.Errorf("%s: %v", name, err)
 				return
 			}
 		} else if !*pipeOut {
 			// validate suffix
 			re := regexp.MustCompile(suffix + "$")
-			i := re.FindStringIndex(fileName)
+			i := re.FindStringIndex(w.fileName)
 			if i == nil {
-				errch <- fmt.Errorf("%s: error: file %s invalid suffix (expected %s) -- ignored", name, fileName, suffix)
+				w.errch <- fmt.Errorf("%s: error: file %s invalid suffix (expected %s) -- ignored", name, w.fileName, suffix)
 				return
 			}
-			ofn := fileName[:i[0]]
+			ofn := w.fileName[:i[0]]
 
 			// check if the file exists
 			ftest, err = os.OpenFile(ofn, fInputFlags, 0755)
 			if err == nil && !*force {
-				errch <- fmt.Errorf("%s: error: file %s already exists; not overwritten", name, ofn)
+				w.errch <- fmt.Errorf("%s: error: file %s already exists; not overwritten", name, ofn)
 				return
 			} else {
 				ftest.Close()
@@ -329,7 +357,7 @@ func doWork(name string, errch chan error, fileName string, compress bool) {
 
 			fout, err = os.OpenFile(ofn, fOutputFlags, 0664)
 			if err != nil {
-				errch <- fmt.Errorf("%s: %v", name, err)
+				w.errch <- fmt.Errorf("%s: %v", name, err)
 				return
 			}
 		} else {
@@ -338,11 +366,11 @@ func doWork(name string, errch chan error, fileName string, compress bool) {
 	}
 
 	if fout == os.Stdout && *parallel {
-		errch <- fmt.Errorf("%s: error: file %s cannot output to stdout in parallel mode", name, fileName)
+		w.errch <- fmt.Errorf("%s: error: file %s cannot output to stdout in parallel mode", name, w.fileName)
 		return
 	}
 
-	if compress {
+	if !*decompress {
 		switch *algorithm {
 		case algorithmGzip:
 			fallthrough
@@ -351,7 +379,7 @@ func doWork(name string, errch chan error, fileName string, compress bool) {
 		case algorithmZstd:
 			fallthrough
 		case algorithmLZ4:
-			err = compressQAT(fin, fout, alg, dfmt)
+			err = compressQAT(fin, fout, w)
 
 		case algorithmSWGzip:
 			err = compressSWGzip(fin, fout, *level)
@@ -362,7 +390,7 @@ func doWork(name string, errch chan error, fileName string, compress bool) {
 		case algorithmSWZstd:
 			err = compressSWZstd(fin, fout, *level)
 		default:
-			errch <- fmt.Errorf("%s: error: algorithm not supported", name)
+			w.errch <- fmt.Errorf("%s: error: algorithm not supported", name)
 			return
 		}
 	} else {
@@ -374,7 +402,7 @@ func doWork(name string, errch chan error, fileName string, compress bool) {
 		case algorithmZstd:
 			fallthrough
 		case algorithmLZ4:
-			err = decompressQAT(fin, fout, alg, dfmt)
+			err = decompressQAT(fin, fout, w)
 		case algorithmSWGzip:
 			err = decompressSWGzip(fin, fout)
 		case algorithmSWLZ4:
@@ -384,13 +412,13 @@ func doWork(name string, errch chan error, fileName string, compress bool) {
 		case algorithmSWZstd:
 			err = decompressSWZstd(fin, fout)
 		default:
-			errch <- fmt.Errorf("%s: error: algorithm not supported", name)
+			w.errch <- fmt.Errorf("%s: error: algorithm not supported", name)
 			return
 		}
 	}
 
 	if err != nil {
-		errch <- fmt.Errorf("%s: %v", name, err)
+		w.errch <- fmt.Errorf("%s: %v", name, err)
 		return
 	}
 
@@ -402,10 +430,13 @@ func doWork(name string, errch chan error, fileName string, compress bool) {
 	}
 
 	if !*test && !*keep && !*pipeOut && err == nil && fout != os.Stdout {
-		err := os.Remove(fileName)
+		err := os.Remove(w.fileName)
 		if err != nil {
-			errch <- fmt.Errorf("%s: error: removing file; err: %v", fileName, err)
+			w.errch <- fmt.Errorf("%s: error: removing file; err: %v", w.fileName, err)
 			return
 		}
 	}
+
+	// send completed work item back to main()
+	w.workch <- w
 }

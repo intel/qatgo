@@ -15,6 +15,17 @@ import (
 	"github.com/pierrec/lz4/v4"
 )
 
+type workItem struct {
+	fileName string // File Name
+	jobId    int    // Job Id
+	loopCnt  int    // Loop Counter
+	alg      qatzip.Algorithm
+	dfmt     qatzip.DeflateFmt
+	perf     perf
+	errch    chan<- error
+	workch   chan<- *workItem
+}
+
 func compressSWGzip(fin *os.File, fout *os.File, level int) (err error) {
 	g, err := gzip.NewWriterLevel(fout, level)
 	if err != nil {
@@ -74,7 +85,7 @@ func compressSWZstd(fin *os.File, fout *os.File, level int) (err error) {
 	return err
 }
 
-func compressQAT(fin *os.File, fout *os.File, alg qatzip.Algorithm, dfmt qatzip.DeflateFmt) (err error) {
+func compressQAT(fin *os.File, fout *os.File, w *workItem) (err error) {
 	r1 := new(syscall.Rusage)
 	r2 := new(syscall.Rusage)
 	syscall.Getrusage(syscall.RUSAGE_SELF, r1)
@@ -86,8 +97,8 @@ func compressQAT(fin *os.File, fout *os.File, alg qatzip.Algorithm, dfmt qatzip.
 		qatzip.CompressionLevelOption(*level),
 		qatzip.InputBufferModeOption(qatzip.InputBufferMode(*inputBufMode)),
 		qatzip.OutputBufLengthOption(*outputBufSize),
-		qatzip.AlgorithmOption(alg),
-		qatzip.DeflateFmtOption(dfmt),
+		qatzip.AlgorithmOption(w.alg),
+		qatzip.DeflateFmtOption(w.dfmt),
 		qatzip.DebugLevelOption(qatzip.DebugLevel(*debug)),
 	)
 
@@ -106,21 +117,12 @@ func compressQAT(fin *os.File, fout *os.File, alg qatzip.Algorithm, dfmt qatzip.
 	t3 := time.Now().UnixNano()
 	syscall.Getrusage(syscall.RUSAGE_SELF, r2)
 
-	if *showStats && err == nil {
-		fmt.Fprintf(os.Stderr, "Wall Time %d ms\n", (t3-t1)/1_000_000)
-		fmt.Fprintf(os.Stderr, "User CPU Time %d ms\n", (r2.Utime.Nano()-r1.Utime.Nano())/1_000_000)
-		fmt.Fprintf(os.Stderr, "System CPU Time %d ms\n", (r2.Stime.Nano()-r1.Stime.Nano())/1_000_000)
-		fmt.Fprintf(os.Stderr, "Init Time %d ms\n", (t2-t1)/1_000_000)
-		dumpStats(z.GetPerf(), true)
-	}
-
-	if *showStatsCSV && err == nil {
-		fmt.Fprintf(os.Stderr, "c,")
-		fmt.Fprintf(os.Stderr, "%d,", (t3-t1)/1_000_000)                           // Wall Time
-		fmt.Fprintf(os.Stderr, "%d,", (r2.Utime.Nano()-r1.Utime.Nano())/1_000_000) // User CPU
-		fmt.Fprintf(os.Stderr, "%d,", (r2.Stime.Nano()-r1.Stime.Nano())/1_000_000) // System CPU
-		fmt.Fprintf(os.Stderr, "%d,", (t2-t1)/1_000_000)                           // Init Time
-		dumpStatsCSV(z.GetPerf(), true)
+	if err == nil {
+		w.perf.wallTimeNS = t3 - t1
+		w.perf.userTimeNS = r2.Utime.Nano() - r1.Utime.Nano()
+		w.perf.systemTimeNS = r2.Stime.Nano() - r1.Stime.Nano()
+		w.perf.initTimeNS = (t2 - t1)
+		w.perf.qp = z.GetPerf()
 	}
 
 	return err
@@ -159,7 +161,7 @@ func decompressSWZstd(fin *os.File, fout *os.File) (err error) {
 	return err
 }
 
-func decompressQAT(fin *os.File, fout *os.File, alg qatzip.Algorithm, dfmt qatzip.DeflateFmt) (err error) {
+func decompressQAT(fin *os.File, fout *os.File, w *workItem) (err error) {
 	r1 := new(syscall.Rusage)
 	r2 := new(syscall.Rusage)
 	syscall.Getrusage(syscall.RUSAGE_SELF, r1)
@@ -173,8 +175,8 @@ func decompressQAT(fin *os.File, fout *os.File, alg qatzip.Algorithm, dfmt qatzi
 	err = z.Apply(
 		qatzip.InputBufLengthOption(*inputBufSize),
 		qatzip.OutputBufLengthOption(*outputBufSize),
-		qatzip.AlgorithmOption(alg),
-		qatzip.DeflateFmtOption(dfmt),
+		qatzip.AlgorithmOption(w.alg),
+		qatzip.DeflateFmtOption(w.dfmt),
 		qatzip.DebugLevelOption(qatzip.DebugLevel(*debug)),
 	)
 
@@ -191,58 +193,13 @@ func decompressQAT(fin *os.File, fout *os.File, alg qatzip.Algorithm, dfmt qatzi
 	t3 := time.Now().UnixNano()
 	syscall.Getrusage(syscall.RUSAGE_SELF, r2)
 
-	if *showStats && err == nil {
-		fmt.Fprintf(os.Stderr, "Wall Time %d ms\n", (t3-t1)/1_000_000)
-		fmt.Fprintf(os.Stderr, "User CPU Time %d ms\n", (r2.Utime.Nano()-r1.Utime.Nano())/1_000_000)
-		fmt.Fprintf(os.Stderr, "System CPU Time %d ms\n", (r2.Stime.Nano()-r1.Stime.Nano())/1_000_000)
-		fmt.Fprintf(os.Stderr, "Init Time %d ms\n", (t2-t1)/1_000_000)
-		dumpStats(z.GetPerf(), false)
-	}
-
-	if *showStatsCSV && err == nil {
-		fmt.Fprintf(os.Stderr, "d,")
-		fmt.Fprintf(os.Stderr, "%d,", (t3-t1)/1_000_000)                           // Wall Time
-		fmt.Fprintf(os.Stderr, "%d,", (r2.Utime.Nano()-r1.Utime.Nano())/1_000_000) // User CPU
-		fmt.Fprintf(os.Stderr, "%d,", (r2.Stime.Nano()-r1.Stime.Nano())/1_000_000) // System CPU
-		fmt.Fprintf(os.Stderr, "%d,", (t2-t1)/1_000_000)                           // Init Time
-		dumpStatsCSV(z.GetPerf(), false)
+	if err == nil {
+		w.perf.wallTimeNS = t3 - t1
+		w.perf.userTimeNS = r2.Utime.Nano() - r1.Utime.Nano()
+		w.perf.systemTimeNS = r2.Stime.Nano() - r1.Stime.Nano()
+		w.perf.initTimeNS = (t2 - t1)
+		w.perf.qp = z.GetPerf()
 	}
 
 	return err
-}
-
-func dumpStats(perf qatzip.Perf, compress bool) {
-	fmt.Fprintf(os.Stderr, "Bytes In %d\n", perf.BytesIn)
-	fmt.Fprintf(os.Stderr, "Bytes Out %d\n", perf.BytesOut)
-	fmt.Fprintf(os.Stderr, "Read Time  %d ms\n", perf.ReadTimeNS/1_000_000)
-	fmt.Fprintf(os.Stderr, "Write Time  %d ms\n", perf.WriteTimeNS/1_000_000)
-	fmt.Fprintf(os.Stderr, "Engine Time %d ms\n", perf.EngineTimeNS/1_000_000)
-	fmt.Fprintf(os.Stderr, "Copy Time %d ms\n", perf.CopyTimeNS/1_000_000)
-
-	if compress {
-		fmt.Fprintf(os.Stderr, "Compression Ratio %f\n", float64(perf.BytesIn)/float64(perf.BytesOut))
-		fmt.Fprintf(os.Stderr, "Compression Speed %f MB/s (Engine)\n", (float64(perf.BytesIn)/1_000_000.0)/(float64(perf.EngineTimeNS)/1_000_000_000.0))
-	} else {
-		fmt.Fprintf(os.Stderr, "Compression Ratio %f\n", float64(perf.BytesOut)/float64(perf.BytesIn))
-		fmt.Fprintf(os.Stderr, "Compression Speed %f MB/s (Engine)\n", (float64(perf.BytesOut)/1_000_000.0)/(float64(perf.EngineTimeNS)/1_000_000_000.0))
-	}
-
-}
-
-func dumpStatsCSV(perf qatzip.Perf, compress bool) {
-	fmt.Fprintf(os.Stderr, "%d,", perf.BytesIn)
-	fmt.Fprintf(os.Stderr, "%d,", perf.BytesOut)
-	fmt.Fprintf(os.Stderr, "%d,", perf.ReadTimeNS/1_000_000)
-	fmt.Fprintf(os.Stderr, "%d,", perf.WriteTimeNS/1_000_000)
-	fmt.Fprintf(os.Stderr, "%d,", perf.EngineTimeNS/1_000_000)
-	fmt.Fprintf(os.Stderr, "%d,", perf.CopyTimeNS/1_000_000)
-
-	if compress {
-		fmt.Fprintf(os.Stderr, "%f,", float64(perf.BytesIn)/float64(perf.BytesOut))
-		fmt.Fprintf(os.Stderr, "%f\n", (float64(perf.BytesIn)/1_000_000.0)/(float64(perf.EngineTimeNS)/1_000_000_000.0))
-	} else {
-		fmt.Fprintf(os.Stderr, "%f,", float64(perf.BytesOut)/float64(perf.BytesIn))
-		fmt.Fprintf(os.Stderr, "%f\n", (float64(perf.BytesOut)/1_000_000.0)/(float64(perf.EngineTimeNS)/1_000_000_000.0))
-	}
-
 }

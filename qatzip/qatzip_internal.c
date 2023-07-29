@@ -54,12 +54,15 @@ static int qatzip_dload_zstd_functions(qatzip_state_t * state)
 
 	QzSession_ZSTD_T *session = &(state->zstd_session);
 
-	session->zstd_handle = dlopen(ZSTD_LIB, RTLD_LAZY);
+	char *zstd_lib_env = getenv("QATGO_ZSTD_LIB_PATH");
+	char *qzstd_lib_env = getenv("QATGO_QZSTD_LIB_PATH");
+
+	session->zstd_handle = dlopen(zstd_lib_env ? zstd_lib_env : ZSTD_LIB, RTLD_LAZY);
 	if (!session->zstd_handle) {
 		qatzip_debug(QDL_HIGH, state, QATHDR "Failed to load zstd: %s\n", dlerror());
 		return QZ_FAIL;
 	}
-	session->qzstd_handle = dlopen(QZSTD_LIB, RTLD_NOW);
+	session->qzstd_handle = dlopen(qzstd_lib_env ? qzstd_lib_env : QZSTD_LIB, RTLD_NOW);
 	if (!session->qzstd_handle) {
 		qatzip_debug(QDL_HIGH, state, QATHDR "failed to load qzstd: %s\n", dlerror());
 		return QZ_NO_SW_AVAIL;

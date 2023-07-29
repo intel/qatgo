@@ -7,6 +7,8 @@ import (
 	"compress/flate"
 	"compress/gzip"
 	"io"
+	"os"
+	"strconv"
 	"testing"
 
 	"github.com/DataDog/zstd"
@@ -500,7 +502,7 @@ func TestDirectCompressCRC(t *testing.T) {
 }
 
 func TestWriterApply(t *testing.T) {
-	b := bytes.NewBuffer(bytesSimpleGzip)
+	b := bytes.NewBuffer([]byte("Hello World"))
 	z := NewWriter(b)
 
 	err := z.Apply(CompressionLevelOption(5))
@@ -509,4 +511,69 @@ func TestWriterApply(t *testing.T) {
 
 	}
 	z.Close()
+}
+
+func TestApplyEnvOptions(t *testing.T) {
+	compLvlExpected := 2
+	algorithmExpected := "lz4"
+	os.Setenv(envAlgorithm, algorithmExpected)
+	os.Setenv(envCompressionLvl, strconv.Itoa(compLvlExpected))
+
+	w := bytes.NewBuffer(nil)
+	z := NewWriter(w)
+
+	if z.p.Algorithm != algorithmConv[algorithmExpected] {
+		t.Errorf("TestFail: algorithm %d not set by environment vars", algorithmConv[algorithmExpected])
+	}
+
+	if z.p.Level != compLvlExpected {
+		t.Errorf("TestFail: expected compression level %d but got %d", compLvlExpected, z.p.Level)
+	}
+
+	err := z.Reset(w)
+	if err == nil || err == ErrUnsupportedFmt {
+		if z.p.Algorithm != algorithmConv[algorithmExpected] {
+			t.Errorf("TestFail: algorithm %d not set by environment vars after reset", algorithmConv[algorithmExpected])
+		}
+
+		if z.p.Level != compLvlExpected {
+			t.Errorf("TestFail: expected compression level %d but got %d after reset", compLvlExpected, z.p.Level)
+		}
+	} else {
+		t.Errorf("TestFail: Writer reset failure, received %d", err)
+	}
+	os.Unsetenv(envAlgorithm)
+	os.Unsetenv(envCompressionLvl)
+
+	z.Close()
+}
+
+// Test for GTO-158: Close() Error Status not cleared on Reset() on Writer
+func TestReset(t *testing.T) {
+	bw := bytes.NewBuffer([]byte("Hello World"))
+	buf := new(bytes.Buffer)
+	zw := NewWriter(buf)
+
+	zw.Reset(buf)
+
+	if _, err := io.Copy(zw, bw); err != nil {
+		t.Fatalf("TestFail: error writing after reset '%v'", err)
+	}
+
+	zw.Close()
+
+	br := new(bytes.Buffer)
+	zr, err := NewReader(buf)
+
+	if err != nil {
+		t.Fatalf("TestFail: initialization failure, received '%v'", err)
+	}
+
+	zr.Reset(buf)
+
+	if _, err := io.Copy(br, zr); err != nil {
+		t.Fatalf("TestFail: error writing after reset '%v'", err)
+	}
+
+	zr.Close()
 }

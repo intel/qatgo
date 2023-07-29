@@ -24,6 +24,13 @@ const (
 	ZSTD
 )
 
+var algorithmConv = map[string]Algorithm{
+	"deflate": DEFLATE,
+	"gzip":    DEFLATE,
+	"lz4":     LZ4,
+	"zstd":    ZSTD,
+}
+
 func (alg Algorithm) isValid() bool {
 	switch alg {
 	case DEFLATE, LZ4, ZSTD:

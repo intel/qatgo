@@ -182,9 +182,11 @@ func (z *Reader) Read(p []byte) (n int, err error) {
 		// decompress input data
 		rq := trace.StartRegion(z.ctx, "Qz(2) Decompress")
 		t1 = time.Now().UnixNano()
-		z.perf.BytesIn += uint64(z.inputBufRead - z.inputBufOffset)
 		in, out, err := z.q.Decompress(z.inputBuf[z.inputBufOffset:z.inputBufRead], z.outputBuf)
-		z.perf.BytesOut += uint64(out)
+		if err == nil {
+			z.perf.BytesIn += uint64(in)
+			z.perf.BytesOut += uint64(out)
+		}
 		t2 = time.Now().UnixNano()
 		z.perf.EngineTimeNS += uint64(t2 - t1)
 		rq.End()

@@ -8,7 +8,9 @@ import (
 	"context"
 	"encoding/binary"
 	"io"
+	"os"
 	"runtime/trace"
+	"strconv"
 	"time"
 
 	"github.com/DataDog/zstd"
@@ -52,6 +54,11 @@ const (
 	lz4Magic4 uint8  = 0x02
 )
 
+const (
+	envAlgorithm      = "QATGO_ALGORITHM"
+	envCompressionLvl = "QATGO_COMPRESSION_LEVEL"
+)
+
 // Performance counters
 type Perf struct {
 	ReadTimeNS   uint64 // time (ns) spent reading from r
@@ -62,11 +69,39 @@ type Perf struct {
 	CopyTimeNS   uint64 // time (ns) spent copying buffers + reallocation
 }
 
+func applyEnvOptions(z *Writer) (err error) {
+	algorithmStr := os.Getenv(envAlgorithm)
+	if algorithmStr != "" {
+		algorithm, ok := algorithmConv[algorithmStr]
+		if !ok {
+			err = ErrParamAlgorithm
+			return err
+		}
+		if err := z.Apply(AlgorithmOption(algorithm)); err != nil {
+			return err
+		}
+	}
+	compLvlStr := os.Getenv(envCompressionLvl)
+	if compLvlStr != "" {
+		var compLvl int
+		if compLvl, err = strconv.Atoi(compLvlStr); err != nil {
+			err = ErrParamCompressionLevel
+			return err
+		}
+		if err := z.Apply(CompressionLevelOption(compLvl)); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
 // NewWriter creates a new Writer with output io.Writer w
 func NewWriter(w io.Writer) *Writer {
 	z := new(Writer)
 	z.closed = true
 	z.p = defaultParams()
+	z.err = applyEnvOptions(z)
 	z.w = w
 	return z
 }
@@ -186,6 +221,7 @@ func (z *Writer) Reset(w io.Writer) (err error) {
 
 	z.w = w
 	z.closed = false
+	z.err = nil
 	z.wroteHeader = false
 	z.bufferGrowth = z.p.BufferGrowth
 	z.bounceBuf = make([]byte, 0, z.p.BounceBufferLength)
@@ -294,7 +330,7 @@ func (z *Writer) compressWrite(p []byte) (n int, err error) {
 		t1 = time.Now().UnixNano()
 		in, out, err := z.q.Compress(p[consumed:], z.outputBuf.Bytes())
 		if err == nil {
-			z.perf.BytesIn += uint64(len(p) - consumed)
+			z.perf.BytesIn += uint64(in)
 			z.perf.BytesOut += uint64(out)
 			t2 = time.Now().UnixNano()
 			z.perf.EngineTimeNS += uint64(t2 - t1)
