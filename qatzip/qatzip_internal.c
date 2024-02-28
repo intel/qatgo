@@ -418,7 +418,7 @@ int qatzip_decompress(qatzip_state_t * state, unsigned char *in_buf, unsigned in
 		     stream->pending_in, stream->pending_out, status);
 	qatzip_debug_dump(QDL_DEBUG, state, stream->out, stream->out_sz);
 
-	if (status != QZ_OK) {
+	if (status != QZ_OK && status != QZ_BUF_ERROR) {
 		stream->out = NULL;
 		qatzip_debug(QDL_HIGH, state, QATHDR "error: decompressing input data (status: %d)\n", status);
 		return status;

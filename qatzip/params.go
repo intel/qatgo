@@ -12,8 +12,9 @@ type InputBufferMode int
 const (
 	DefaultCompression        = 1
 	MinBufferLength           = 128 * 1024
+	DefaultMaxBufferLength    = 2 * 1024 * 1024 * 1024
 	DefaultBufferLength       = 128 * 1024 * 1024
-	DefaultBufferGrowth       = 1024 * 1024
+	DefaultBufferGrowth       = 128 * 1024 * 1024
 	DefaultBounceBufferLength = 512
 	MinBounceBufferLength     = 512
 )
@@ -125,6 +126,7 @@ const (
 // Configuration parameters for QATgo compression
 type params struct {
 	OutputBufLength    int             // Output buffer size for QAT (for Reader and Writer)
+	MaxBufferLength    int             // Maximum size for the output buffer to grow (Default 2GB)
 	InputBufLength     int             // Input buffer size for QAT (for Reader)
 	BufferGrowth       int             // How much to increase output buffer if required (Default 1MB)
 	Direction          Direction       // Configures hardware for compress, decompress, or both (Default: Both)
@@ -155,5 +157,6 @@ func defaultParams() (p params) {
 	p.InputBufLength = DefaultBufferLength
 	p.BufferGrowth = DefaultBufferGrowth
 	p.BounceBufferLength = DefaultBounceBufferLength
+	p.MaxBufferLength = DefaultMaxBufferLength
 	return
 }
