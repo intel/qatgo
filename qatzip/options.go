@@ -192,8 +192,14 @@ func OutputBufLengthOption(len int) Option {
 
 		switch z := a.(type) {
 		case *Writer:
+			if len > z.p.MaxBufferLength {
+				return ErrParamOutputBufLength
+			}
 			z.p.OutputBufLength = len
 		case *Reader:
+			if len > z.p.MaxBufferLength {
+				return ErrParamOutputBufLength
+			}
 			z.p.OutputBufLength = len
 		default:
 			return ErrApplyInvalidType
@@ -238,14 +244,13 @@ func BounceBufferLengthOption(len int) Option {
 	}
 }
 
-// If output buffer is too small (see QZ_BUF_ERROR) increase size of output buffer a factor of len and retry
+// If output buffer is too small (see QZ_BUF_ERROR) increase size of output buffer by len and retry
 // (Reader/Writer)
 func BufferGrowthOption(len int) Option {
 	return func(a applier) error {
 		if len < MinBufferLength {
 			return ErrParamBufferGrowth
 		}
-
 		switch z := a.(type) {
 		case *Reader:
 			z.p.BufferGrowth = len
@@ -397,6 +402,25 @@ func WaitCountThresholdOption(n int) Option {
 			z.p.WaitCountThreshold = n
 		case *QzBinding:
 			z.p.WaitCountThreshold = n
+		default:
+			return ErrApplyInvalidType
+		}
+
+		return nil
+	}
+}
+
+// Max size an output buffer can grow to in bytes
+func MaxBufferLengthOption(n int) Option {
+	return func(a applier) error {
+		if n < MinBufferLength {
+			return ErrParamMaxBufferLength
+		}
+		switch z := a.(type) {
+		case *Reader:
+			z.p.MaxBufferLength = n
+		case *Writer:
+			z.p.MaxBufferLength = n
 		default:
 			return ErrApplyInvalidType
 		}

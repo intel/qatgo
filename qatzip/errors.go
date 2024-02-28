@@ -45,6 +45,8 @@ var (
 	ErrInputBufferMode         = errors.New(QatErrHdr + "invalid input buffer mode")
 	ErrApplyPostInit           = errors.New(QatErrHdr + "cannot apply options after Reset() or I/O")
 	ErrApplyInvalidType        = errors.New(QatErrHdr + "option appied to incorrect type")
+	ErrMaxBufferGrowth         = errors.New(QatErrHdr + "cannot grow buffer large enough")
+	ErrParamMaxBufferLength    = errors.New(QatErrHdr + "invalid size for max buffer length")
 )
 
 func Error(errorCode int) (err error) {

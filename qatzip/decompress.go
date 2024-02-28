@@ -183,7 +183,7 @@ func (z *Reader) Read(p []byte) (n int, err error) {
 		rq := trace.StartRegion(z.ctx, "Qz(2) Decompress")
 		t1 = time.Now().UnixNano()
 		in, out, err := z.q.Decompress(z.inputBuf[z.inputBufOffset:z.inputBufRead], z.outputBuf)
-		if err == nil {
+		if err == nil || err == ErrBuffer {
 			z.perf.BytesIn += uint64(in)
 			z.perf.BytesOut += uint64(out)
 		}
@@ -195,19 +195,25 @@ func (z *Reader) Read(p []byte) (n int, err error) {
 			in, out, len(z.inputBuf), z.inputBufOffset, z.inputBufRead, len(z.outputBuf), err)
 
 		if err != nil {
-			if err == ErrBuffer {
-				// expand output buffer
-				// TODO grow to a maximum size
+			if err == ErrBuffer && out == 0 {
+				// Grow output buffer, only in the case that it was not large enough for QAT to output any data.
+				if len(z.outputBuf) == DefaultMaxBufferLength {
+					return produced, err
+				}
 				t1 = time.Now().UnixNano()
-				z.bufferGrowth *= 2
-				z.traceLogf(Med, "[expand output buffer] obl:%v -> %v", len(z.outputBuf), remainder+z.bufferGrowth)
-				z.outputBuf = make([]byte, remainder+z.bufferGrowth)
+				newLength := len(z.outputBuf) + z.bufferGrowth
+				if newLength > DefaultMaxBufferLength {
+					newLength = DefaultMaxBufferLength
+				}
+				z.traceLogf(Med, "[expand output buffer] obl:%v -> %v", len(z.outputBuf), newLength)
+				z.outputBuf = make([]byte, newLength)
 				t2 = time.Now().UnixNano()
 				z.perf.CopyTimeNS += uint64(t2 - t1)
 				continue
+			} else if err != ErrBuffer {
+				z.err = err
+				return produced, err
 			}
-			z.err = err
-			return produced, err
 		}
 
 		z.inputBufOffset += in

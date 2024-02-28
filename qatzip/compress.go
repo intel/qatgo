@@ -341,19 +341,24 @@ func (z *Writer) compressWrite(p []byte) (n int, err error) {
 
 		if err != nil {
 			if err == ErrBuffer {
-				// expand output buffer
-				// TODO grow to a maximum size
+				// Grow output buffer, only in the case that it was not large enough for QAT to output any data.
+				if z.outputBuf.Len() == DefaultMaxBufferLength {
+					return consumed, err
+				}
 				t1 = time.Now().UnixNano()
-				z.bufferGrowth *= 2
-				newSize := remainder + z.bufferGrowth
-				z.traceLogf(Med, "[expand output buffer] o:%v n:%v", z.outputBuf.Len(), newSize)
-				z.outputBuf = bytes.NewBuffer(make([]byte, newSize))
+				newLength := z.outputBuf.Len() + z.bufferGrowth
+				if newLength > DefaultMaxBufferLength {
+					newLength = DefaultMaxBufferLength
+				}
+				z.traceLogf(Med, "[expand output buffer] o:%v n:%v", z.outputBuf.Len(), newLength)
+				z.outputBuf = bytes.NewBuffer(make([]byte, newLength))
 				t2 = time.Now().UnixNano()
 				z.perf.CopyTimeNS += uint64(t2 - t1)
 				continue
+			} else if err != ErrBuffer {
+				z.err = err
+				return consumed, err
 			}
-			z.err = err
-			return consumed, err
 		}
 		z.wroteHeader = true
 		consumed += in
@@ -367,7 +372,6 @@ func (z *Writer) compressWrite(p []byte) (n int, err error) {
 			t2 = time.Now().UnixNano()
 			z.perf.WriteTimeNS += uint64(t2 - t1)
 			r.End()
-
 			z.traceLogf(Med, "[write->output] nw:%v err:%v", nw, err)
 
 			if err != nil {
