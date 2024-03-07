@@ -6,7 +6,7 @@ QATgo provides Go bindings for Intel&reg; QAT user mode libraries
 Intel&reg; QuickAssist Technology (Intel&reg; QAT) provides hardware acceleration for offloading security, authentication and compression services from the CPU, thus significantly increasing the performance and efficiency of standard platform solutions.
 
 ## Features
-The following services are available in QATgo v1.0.0:
+The following services are available in QATgo v1.1.0:
 
 * Compression (qatgo/qatzip)
   * DEFLATE gzip and raw (QAT 1.x, 2.0)
@@ -36,6 +36,9 @@ These environment variables allow you to modify default configuration options
 * Optional: libzstd v1.5.5 (required for zstd plugin): https://github.com/facebook/zstd
 
 ## Changelog
+* v1.1.0
+  * Fixed Issue #1: Decompressing large file triggers OOM
+    * Added MaxBufferLengthOption() to cap maximum buffer size
 * v1.0.1
   * Fixed GTO-158: Close() Error Status not cleared on Reset
   * Implemented GTO-147: Adds environment variable support for modifying defaults
